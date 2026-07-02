@@ -13,7 +13,7 @@ import { tritonUnsupportedIrDiagnostic } from "../lowering/diagnostics.js";
 import { lowerElementwiseKernel } from "../lowering/elementwise.js";
 import { lowerMatmulKernel } from "../lowering/matmul.js";
 import { lowerReductionKernel } from "../lowering/reduction.js";
-import { pyName } from "../lowering/names.js";
+import { createPyNameAllocator } from "../lowering/names.js";
 import { printPyModule } from "../py/printer.js";
 import type { PyFunction } from "../py/model.js";
 
@@ -61,20 +61,26 @@ export function createTritonGpuBackend(): GpuBackendPlugin {
       }
       void context;
       const kernels = [...module.kernels].sort((left, right) => left.name.localeCompare(right.name, "en"));
+      // Module names and artifact paths come only from allocated stems: one
+      // bijective, sanitized identifier per kernel, never the raw IR name.
+      const moduleNames = createPyNameAllocator();
+      const stems = new Map(kernels.map((kernel) => [kernel.name, moduleNames.nameFor(kernel.name)]));
+      const stemOf = (kernelName: string): string => stems.get(kernelName) ?? "kernel";
       const modules = kernels.map((kernel) => {
         const classification = classifyTritonKernel(kernel);
         if (!("plan" in classification)) {
           throw new Error(`The Triton backend cannot lower kernel '${kernel.name}' after validation accepted it.`);
         }
         const { plan } = classification;
+        const functionStem = stemOf(kernel.name);
         const emitted: { kernelFunction: PyFunction; wrapperFunction: PyFunction } =
           plan.kind === "matmul"
-            ? lowerMatmulKernel(kernel, plan)
+            ? lowerMatmulKernel(kernel, plan, functionStem)
             : plan.kind === "reduction"
-              ? lowerReductionKernel(kernel, plan)
-              : lowerElementwiseKernel(kernel, plan);
+              ? lowerReductionKernel(kernel, plan, functionStem)
+              : lowerElementwiseKernel(kernel, plan, functionStem);
         return {
-          path: `kernels/${kernel.name}.py`,
+          path: `kernels/${functionStem}.py`,
           language: "python",
           text: printPyModule({
             imports: [...tritonModuleImports],
@@ -86,7 +92,7 @@ export function createTritonGpuBackend(): GpuBackendPlugin {
         modules,
         dependencies: [{ ecosystem: "python", name: "triton" }],
         launchWrappers: kernels.map((kernel) => ({
-          hostFunctionName: pyName(kernel.name),
+          hostFunctionName: stemOf(kernel.name),
           kernelName: kernel.name,
           metaParameters: kernel.launch.metaParameters ?? [],
         })),

@@ -2,7 +2,7 @@ import type { GpuIrFunction, GpuIrOperation, GpuScalarType } from "@tsonic/targe
 import { tritonElementwiseBlockSize, tritonIntrinsicRows } from "../capabilities/matrix.js";
 import type { PyFunction, PyStatement } from "../py/model.js";
 import type { ElementwisePlan, TensorParameter } from "./classify.js";
-import { createPyNameAllocator, pyName } from "./names.js";
+import { createPyNameAllocator } from "./names.js";
 
 const binaryOperatorText: ReadonlyMap<string, string> = new Map([
   ["add", "+"],
@@ -45,13 +45,13 @@ interface ElementwiseEmit {
 // SPMD-to-block lowering: the global thread index becomes a BLOCK_SIZE-wide
 // offsets vector, scalar IR values become Triton vectors (scalars broadcast),
 // and conditional guards become load/store masks.
-export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwisePlan): ElementwiseEmit {
+export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwisePlan, functionStem: string): ElementwiseEmit {
   const tensors = kernel.parameters.filter((parameter): parameter is TensorParameter => parameter.kind === "tensor");
   const scalars = kernel.parameters.filter((parameter) => parameter.kind === "scalar");
 
   const names = createPyNameAllocator();
-  const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
-  const wrapperName = pyName(kernel.name);
+  const kernelFunctionName = `_${functionStem}_kernel`;
+  const wrapperName = functionStem;
   names.reserve(kernelFunctionName);
   names.reserve(wrapperName);
   for (const tensor of tensors) {

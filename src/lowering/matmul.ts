@@ -2,7 +2,7 @@ import type { GpuIrFunction } from "@tsonic/target-gpu";
 import { tritonMatmulBlockPolicy } from "../capabilities/matrix.js";
 import type { PyFunction } from "../py/model.js";
 import type { MatmulPlan } from "./classify.js";
-import { createPyNameAllocator, pyName } from "./names.js";
+import { createPyNameAllocator } from "./names.js";
 
 interface MatmulEmit {
   readonly kernelFunction: PyFunction;
@@ -12,10 +12,10 @@ interface MatmulEmit {
 // The recognized [M,K] x [K,N] -> [M,N] accumulator pattern lowers through
 // the canonical tiled Triton matmul: 2D program grid, block tiles, tl.dot
 // accumulation over K blocks. Block sizes come from backend policy rows.
-export function lowerMatmulKernel(kernel: GpuIrFunction, plan: MatmulPlan): MatmulEmit {
+export function lowerMatmulKernel(_kernel: GpuIrFunction, plan: MatmulPlan, functionStem: string): MatmulEmit {
   const names = createPyNameAllocator();
-  const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
-  const wrapperName = pyName(kernel.name);
+  const kernelFunctionName = `_${functionStem}_kernel`;
+  const wrapperName = functionStem;
   names.reserve(kernelFunctionName);
   names.reserve(wrapperName);
   const a = names.nameFor(plan.a);

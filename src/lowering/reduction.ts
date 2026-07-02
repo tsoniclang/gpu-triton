@@ -1,7 +1,7 @@
 import type { GpuIrFunction } from "@tsonic/target-gpu";
 import type { PyFunction } from "../py/model.js";
 import type { ReductionPlan, TensorParameter } from "./classify.js";
-import { createPyNameAllocator, pyName } from "./names.js";
+import { createPyNameAllocator } from "./names.js";
 
 interface ReductionEmit {
   readonly kernelFunction: PyFunction;
@@ -10,13 +10,13 @@ interface ReductionEmit {
 
 // Whole-tensor sum lowered as a single-program block reduction: one arange
 // over a power-of-two block covering the tensor, masked with the identity.
-export function lowerReductionKernel(kernel: GpuIrFunction, plan: ReductionPlan): ReductionEmit {
+export function lowerReductionKernel(kernel: GpuIrFunction, plan: ReductionPlan, functionStem: string): ReductionEmit {
   const tensors = kernel.parameters.filter((parameter): parameter is TensorParameter => parameter.kind === "tensor");
   const values = tensors.find((tensor) => tensor.name === plan.valuesTensor);
   const out = tensors.find((tensor) => tensor.name === plan.outTensor);
   const names = createPyNameAllocator();
-  const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
-  const wrapperName = pyName(kernel.name);
+  const kernelFunctionName = `_${functionStem}_kernel`;
+  const wrapperName = functionStem;
   names.reserve(kernelFunctionName);
   names.reserve(wrapperName);
   const valuesName = names.nameFor(plan.valuesTensor);
