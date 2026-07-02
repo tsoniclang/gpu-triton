@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { printPyModule, pyName } from "../dist/index.js";
+import { createPyNameAllocator, printPyModule, pyName } from "../dist/index.js";
 
 test("printer renders imports, decorators, and nesting deterministically", () => {
   const text = printPyModule({
@@ -52,10 +52,25 @@ test("empty nested blocks render pass", () => {
   assert.ok(text.includes("if True:\n        pass"));
 });
 
-test("python names are sanitized deterministically", () => {
+test("module-level names are sanitized deterministically", () => {
   assert.equal(pyName("%7"), "_t7");
   assert.equal(pyName("lambda"), "lambda_v");
   assert.equal(pyName("offsets"), "offsets_v");
-  assert.equal(pyName("_t7"), "_t7_v");
-  assert.equal(pyName("acc"), "acc");
+  assert.equal(pyName("add"), "add");
+});
+
+test("the per-kernel allocator is a bijection", () => {
+  const names = createPyNameAllocator();
+  assert.equal(names.nameFor("lambda"), "lambda_v");
+  assert.notEqual(names.nameFor("lambda_v"), "lambda_v");
+  assert.equal(names.nameFor("lambda"), "lambda_v");
+  assert.equal(names.nameFor("%7"), "_t7");
+  assert.notEqual(names.nameFor("_t7"), "_t7");
+  assert.equal(names.nameFor("offsets"), "offsets_v");
+  const allocated = ["lambda", "lambda_v", "%7", "_t7", "offsets"].map((id) => names.nameFor(id));
+  assert.equal(new Set(allocated).size, allocated.length);
+  const mask = names.derived("mask_out");
+  assert.notEqual(names.nameFor("mask_out"), mask);
+  names.reserve("taken");
+  assert.notEqual(names.nameFor("taken"), "taken");
 });

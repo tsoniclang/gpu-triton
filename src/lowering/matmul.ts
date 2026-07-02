@@ -2,7 +2,7 @@ import type { GpuIrFunction } from "@tsonic/target-gpu";
 import { tritonMatmulBlockPolicy } from "../capabilities/matrix.js";
 import type { PyFunction } from "../py/model.js";
 import type { MatmulPlan } from "./classify.js";
-import { pyName } from "./names.js";
+import { createPyNameAllocator, pyName } from "./names.js";
 
 interface MatmulEmit {
   readonly kernelFunction: PyFunction;
@@ -13,22 +13,34 @@ interface MatmulEmit {
 // the canonical tiled Triton matmul: 2D program grid, block tiles, tl.dot
 // accumulation over K blocks. Block sizes come from backend policy rows.
 export function lowerMatmulKernel(kernel: GpuIrFunction, plan: MatmulPlan): MatmulEmit {
-  const a = pyName(plan.a);
-  const b = pyName(plan.b);
-  const c = pyName(plan.c);
-  const m = pyName(plan.m);
-  const k = pyName(plan.k);
-  const n = pyName(plan.n);
-  const { blockM, blockN, blockK } = tritonMatmulBlockPolicy;
+  const names = createPyNameAllocator();
   const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
+  const wrapperName = pyName(kernel.name);
+  names.reserve(kernelFunctionName);
+  names.reserve(wrapperName);
+  const a = names.nameFor(plan.a);
+  const b = names.nameFor(plan.b);
+  const c = names.nameFor(plan.c);
+  const m = names.nameFor(plan.m);
+  const k = names.nameFor(plan.k);
+  const n = names.nameFor(plan.n);
+  const aPtr = names.derived(`${a}_ptr`);
+  const bPtr = names.derived(`${b}_ptr`);
+  const cPtr = names.derived(`${c}_ptr`);
+  const aMask = names.derived(`${a}_mask`);
+  const bMask = names.derived(`${b}_mask`);
+  const cMask = names.derived(`${c}_mask`);
+  const aTile = names.derived(`${a}_tile`);
+  const bTile = names.derived(`${b}_tile`);
+  const { blockM, blockN, blockK } = tritonMatmulBlockPolicy;
 
   return {
     kernelFunction: {
       name: kernelFunctionName,
       parameters: [
-        `${a}_ptr`,
-        `${b}_ptr`,
-        `${c}_ptr`,
+        aPtr,
+        bPtr,
+        cPtr,
         m,
         n,
         k,
@@ -52,36 +64,36 @@ export function lowerMatmulKernel(kernel: GpuIrFunction, plan: MatmulPlan): Matm
             { kind: "assign", target: "k_offsets", value: "k_block * BLOCK_K + offs_k" },
             {
               kind: "assign",
-              target: `${a}_mask`,
+              target: aMask,
               value: `(offs_m[:, None] < ${m}) & (k_offsets[None, :] < ${k})`,
             },
             {
               kind: "assign",
-              target: `${a}_tile`,
-              value: `tl.load(${a}_ptr + offs_m[:, None] * ${k} + k_offsets[None, :], mask=${a}_mask, other=0.0)`,
+              target: aTile,
+              value: `tl.load(${aPtr} + offs_m[:, None] * ${k} + k_offsets[None, :], mask=${aMask}, other=0.0)`,
             },
             {
               kind: "assign",
-              target: `${b}_mask`,
+              target: bMask,
               value: `(k_offsets[:, None] < ${k}) & (offs_n[None, :] < ${n})`,
             },
             {
               kind: "assign",
-              target: `${b}_tile`,
-              value: `tl.load(${b}_ptr + k_offsets[:, None] * ${n} + offs_n[None, :], mask=${b}_mask, other=0.0)`,
+              target: bTile,
+              value: `tl.load(${bPtr} + k_offsets[:, None] * ${n} + offs_n[None, :], mask=${bMask}, other=0.0)`,
             },
-            { kind: "assign", target: "acc", value: `acc + tl.dot(${a}_tile, ${b}_tile)` },
+            { kind: "assign", target: "acc", value: `acc + tl.dot(${aTile}, ${bTile})` },
           ],
         },
-        { kind: "assign", target: `${c}_mask`, value: `(offs_m[:, None] < ${m}) & (offs_n[None, :] < ${n})` },
+        { kind: "assign", target: cMask, value: `(offs_m[:, None] < ${m}) & (offs_n[None, :] < ${n})` },
         {
           kind: "expression",
-          value: `tl.store(${c}_ptr + offs_m[:, None] * ${n} + offs_n[None, :], acc, mask=${c}_mask)`,
+          value: `tl.store(${cPtr} + offs_m[:, None] * ${n} + offs_n[None, :], acc, mask=${cMask})`,
         },
       ],
     },
     wrapperFunction: {
-      name: pyName(kernel.name),
+      name: wrapperName,
       parameters: [a, b, c],
       decorators: [],
       body: [

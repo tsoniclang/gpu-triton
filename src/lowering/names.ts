@@ -1,6 +1,8 @@
-// Deterministic Python name selection for IR value ids, parameters, and
-// shape symbols. Extraction temporaries (%N) become _tN; anything colliding
-// with Python keywords or names this backend emits gets a _v suffix.
+// Deterministic, collision-safe Python name allocation. Each kernel gets one
+// allocator covering its jit function and wrapper: distinct IR ids can never
+// map to the same Python identifier, because every allocated name joins one
+// used-set and candidates are suffixed until free. Extraction temporaries
+// (%N) become _tN.
 
 const reservedPythonNames = new Set([
   "False",
@@ -40,18 +42,80 @@ const reservedPythonNames = new Set([
   "while",
   "with",
   "yield",
+  // Names the emitters themselves assign.
+  "acc",
+  "block_size",
   "grid",
+  "k_block",
+  "k_offsets",
   "mask",
+  "offs_k",
+  "offs_m",
+  "offs_n",
   "offsets",
   "pid",
+  "pid_m",
+  "pid_n",
   "tl",
   "triton",
 ]);
 
+export interface PyNameAllocator {
+  // Bijective id-to-name mapping: the same id always returns the same name,
+  // and no two ids share one.
+  nameFor(id: string): string;
+  // Unique emitter-derived names (pointer args, masks, tiles) memoized per key.
+  derived(key: string): string;
+  // Marks a name the emitter uses verbatim (function names) as taken.
+  reserve(name: string): void;
+  // Pins an id to an already-reserved emitter name (the thread index vector).
+  bind(id: string, name: string): void;
+}
+
+export function createPyNameAllocator(): PyNameAllocator {
+  const assigned = new Map<string, string>();
+  const derivedNames = new Map<string, string>();
+  const used = new Set(reservedPythonNames);
+  const claim = (base: string): string => {
+    let candidate = base.length === 0 ? "value" : base;
+    while (used.has(candidate)) {
+      candidate = `${candidate}_v`;
+    }
+    used.add(candidate);
+    return candidate;
+  };
+  return {
+    nameFor(id) {
+      const existing = assigned.get(id);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const name = claim(id.startsWith("%") ? `_t${id.slice(1)}` : id);
+      assigned.set(id, name);
+      return name;
+    },
+    derived(key) {
+      const existing = derivedNames.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const name = claim(key);
+      derivedNames.set(key, name);
+      return name;
+    },
+    reserve(name) {
+      used.add(name);
+    },
+    bind(id, name) {
+      assigned.set(id, name);
+    },
+  };
+}
+
+// Module-level sanitization for kernel and wrapper function names; kernel
+// names are unique per module by IR validation, and each kernel emits into
+// its own Python module.
 export function pyName(id: string): string {
   const base = id.startsWith("%") ? `_t${id.slice(1)}` : id;
-  if (reservedPythonNames.has(base) || /^_t\d+$/u.test(id)) {
-    return `${base}_v`;
-  }
-  return base;
+  return reservedPythonNames.has(base) ? `${base}_v` : base;
 }

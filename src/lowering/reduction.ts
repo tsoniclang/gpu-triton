@@ -1,7 +1,7 @@
 import type { GpuIrFunction } from "@tsonic/target-gpu";
 import type { PyFunction } from "../py/model.js";
 import type { ReductionPlan, TensorParameter } from "./classify.js";
-import { pyName } from "./names.js";
+import { createPyNameAllocator, pyName } from "./names.js";
 
 interface ReductionEmit {
   readonly kernelFunction: PyFunction;
@@ -14,33 +14,43 @@ export function lowerReductionKernel(kernel: GpuIrFunction, plan: ReductionPlan)
   const tensors = kernel.parameters.filter((parameter): parameter is TensorParameter => parameter.kind === "tensor");
   const values = tensors.find((tensor) => tensor.name === plan.valuesTensor);
   const out = tensors.find((tensor) => tensor.name === plan.outTensor);
-  const valuesName = pyName(plan.valuesTensor);
-  const outName = pyName(plan.outTensor);
-  const partialName = pyName(plan.partialResult);
-  const valuesDimension = values?.tensor.shape[0];
-  const dimName = valuesDimension !== undefined && valuesDimension.kind === "symbol" ? pyName(valuesDimension.name) : `${valuesName}_numel`;
+  const names = createPyNameAllocator();
   const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
+  const wrapperName = pyName(kernel.name);
+  names.reserve(kernelFunctionName);
+  names.reserve(wrapperName);
+  const valuesName = names.nameFor(plan.valuesTensor);
+  const outName = names.nameFor(plan.outTensor);
+  const partialName = names.nameFor(plan.partialResult);
+  const valuesDimension = values?.tensor.shape[0];
+  const dimName =
+    valuesDimension !== undefined && valuesDimension.kind === "symbol"
+      ? names.nameFor(valuesDimension.name)
+      : names.derived(`${valuesName}_numel`);
+  const valuesPtr = names.derived(`${valuesName}_ptr`);
+  const outPtr = names.derived(`${outName}_ptr`);
+  const valuesVals = names.derived(`${valuesName}_vals`);
   void out;
 
   return {
     kernelFunction: {
       name: kernelFunctionName,
-      parameters: [`${valuesName}_ptr`, `${outName}_ptr`, dimName, "BLOCK_SIZE: tl.constexpr"],
+      parameters: [valuesPtr, outPtr, dimName, "BLOCK_SIZE: tl.constexpr"],
       decorators: ["triton.jit"],
       body: [
         { kind: "assign", target: "offsets", value: "tl.arange(0, BLOCK_SIZE)" },
         { kind: "assign", target: "mask", value: `offsets < ${dimName}` },
         {
           kind: "assign",
-          target: `${valuesName}_vals`,
-          value: `tl.load(${valuesName}_ptr + offsets, mask=mask, other=0.0)`,
+          target: valuesVals,
+          value: `tl.load(${valuesPtr} + offsets, mask=mask, other=0.0)`,
         },
-        { kind: "assign", target: partialName, value: `tl.sum(${valuesName}_vals)` },
-        { kind: "expression", value: `tl.store(${outName}_ptr, ${partialName})` },
+        { kind: "assign", target: partialName, value: `tl.sum(${valuesVals})` },
+        { kind: "expression", value: `tl.store(${outPtr}, ${partialName})` },
       ],
     },
     wrapperFunction: {
-      name: pyName(kernel.name),
+      name: wrapperName,
       parameters: [valuesName, outName],
       decorators: [],
       body: [

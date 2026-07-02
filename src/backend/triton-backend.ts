@@ -13,6 +13,7 @@ import { tritonUnsupportedIrDiagnostic } from "../lowering/diagnostics.js";
 import { lowerElementwiseKernel } from "../lowering/elementwise.js";
 import { lowerMatmulKernel } from "../lowering/matmul.js";
 import { lowerReductionKernel } from "../lowering/reduction.js";
+import { pyName } from "../lowering/names.js";
 import { printPyModule } from "../py/printer.js";
 import type { PyFunction } from "../py/model.js";
 
@@ -85,7 +86,7 @@ export function createTritonGpuBackend(): GpuBackendPlugin {
         modules,
         dependencies: [{ ecosystem: "python", name: "triton" }],
         launchWrappers: kernels.map((kernel) => ({
-          hostFunctionName: kernel.name,
+          hostFunctionName: pyName(kernel.name),
           kernelName: kernel.name,
           metaParameters: kernel.launch.metaParameters ?? [],
         })),

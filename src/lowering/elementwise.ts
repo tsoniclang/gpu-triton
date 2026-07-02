@@ -2,7 +2,7 @@ import type { GpuIrFunction, GpuIrOperation, GpuScalarType } from "@tsonic/targe
 import { tritonElementwiseBlockSize, tritonIntrinsicRows } from "../capabilities/matrix.js";
 import type { PyFunction, PyStatement } from "../py/model.js";
 import type { ElementwisePlan, TensorParameter } from "./classify.js";
-import { pyName } from "./names.js";
+import { createPyNameAllocator, pyName } from "./names.js";
 
 const binaryOperatorText: ReadonlyMap<string, string> = new Map([
   ["add", "+"],
@@ -49,6 +49,18 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
   const tensors = kernel.parameters.filter((parameter): parameter is TensorParameter => parameter.kind === "tensor");
   const scalars = kernel.parameters.filter((parameter) => parameter.kind === "scalar");
 
+  const names = createPyNameAllocator();
+  const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
+  const wrapperName = pyName(kernel.name);
+  names.reserve(kernelFunctionName);
+  names.reserve(wrapperName);
+  for (const tensor of tensors) {
+    names.nameFor(tensor.name);
+  }
+  for (const scalar of scalars) {
+    names.nameFor(scalar.name);
+  }
+
   const dimArgumentByTensor = new Map<string, string>();
   const dimArguments: string[] = [];
   for (const tensor of tensors) {
@@ -56,21 +68,14 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
     if (dimension === undefined || dimension.kind !== "symbol") {
       continue;
     }
-    const argument = pyName(dimension.name);
+    const argument = names.nameFor(dimension.name);
     dimArgumentByTensor.set(tensor.name, argument);
     if (!dimArguments.includes(argument)) {
       dimArguments.push(argument);
     }
   }
 
-  const environment = new Map<string, string>();
-  for (const scalar of scalars) {
-    environment.set(scalar.name, pyName(scalar.name));
-  }
-  environment.set(plan.threadIndexResult, "offsets");
-  for (const argument of dimArguments) {
-    environment.set(argument, argument);
-  }
+  names.bind(plan.threadIndexResult, "offsets");
 
   const body: PyStatement[] = [
     { kind: "assign", target: "pid", value: "tl.program_id(0)" },
@@ -78,24 +83,18 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
   ];
   const emittedMasks = new Map<string, string>();
 
-  const reference = (id: string): string => {
-    const known = environment.get(id);
-    if (known !== undefined) {
-      return known;
-    }
-    return pyName(id);
-  };
+  const reference = (id: string): string => names.nameFor(id);
 
   const maskExpressionFor = (tensor: TensorParameter, guards: readonly string[]): string => {
     let maskName = emittedMasks.get(tensor.name);
     if (maskName === undefined) {
-      maskName = `mask_${pyName(tensor.name)}`;
+      maskName = names.derived(`mask_${names.nameFor(tensor.name)}`);
       const dimension = tensor.tensor.shape[0];
       const bound =
         dimension === undefined
           ? "0"
           : dimension.kind === "symbol"
-            ? (dimArgumentByTensor.get(tensor.name) ?? pyName(dimension.name))
+            ? (dimArgumentByTensor.get(tensor.name) ?? names.nameFor(dimension.name))
             : dimension.kind === "literal"
               ? `${dimension.value}`
               : "0";
@@ -113,14 +112,12 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
         case "thread-index":
           break;
         case "const": {
-          const name = pyName(operation.result);
-          environment.set(operation.result, name);
+          const name = names.nameFor(operation.result);
           body.push({ kind: "assign", target: name, value: constText(operation.dtype, operation.value) });
           break;
         }
         case "binary": {
-          const name = pyName(operation.result);
-          environment.set(operation.result, name);
+          const name = names.nameFor(operation.result);
           const operator = binaryOperatorText.get(operation.operator) ?? operation.operator;
           body.push({
             kind: "assign",
@@ -130,16 +127,14 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
           break;
         }
         case "unary": {
-          const name = pyName(operation.result);
-          environment.set(operation.result, name);
+          const name = names.nameFor(operation.result);
           const text = operation.operator === "neg" ? `-(${reference(operation.operand)})` : `~(${reference(operation.operand)})`;
           body.push({ kind: "assign", target: name, value: text });
           break;
         }
         case "intrinsic": {
           const row = tritonIntrinsicRows.find((candidate) => candidate.intrinsic === operation.name);
-          const name = pyName(operation.result);
-          environment.set(operation.result, name);
+          const name = names.nameFor(operation.result);
           const args = operation.operands.map((operand) => reference(operand)).join(", ");
           body.push({ kind: "assign", target: name, value: `${row?.tritonExpression ?? "tl.unsupported"}(${args})` });
           break;
@@ -149,13 +144,12 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
           if (tensor === undefined) {
             break;
           }
-          const name = pyName(operation.result);
-          environment.set(operation.result, name);
+          const name = names.nameFor(operation.result);
           const maskExpression = maskExpressionFor(tensor, guards);
           body.push({
             kind: "assign",
             target: name,
-            value: `tl.load(${pyName(tensor.name)}_ptr + offsets, mask=${maskExpression}, other=${zeroText(operation.dtype)})`,
+            value: `tl.load(${names.derived(`${names.nameFor(tensor.name)}_ptr`)} + offsets, mask=${maskExpression}, other=${zeroText(operation.dtype)})`,
           });
           break;
         }
@@ -167,7 +161,7 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
           const maskExpression = maskExpressionFor(tensor, guards);
           body.push({
             kind: "expression",
-            value: `tl.store(${pyName(tensor.name)}_ptr + offsets, ${reference(operation.value)}, mask=${maskExpression})`,
+            value: `tl.store(${names.derived(`${names.nameFor(tensor.name)}_ptr`)} + offsets, ${reference(operation.value)}, mask=${maskExpression})`,
           });
           break;
         }
@@ -188,10 +182,9 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
   };
   emitOperations(kernel.body.operations, []);
 
-  const kernelFunctionName = `_${pyName(kernel.name)}_kernel`;
   const kernelParameters = [
-    ...tensors.map((tensor) => `${pyName(tensor.name)}_ptr`),
-    ...scalars.map((scalar) => pyName(scalar.name)),
+    ...tensors.map((tensor) => names.derived(`${names.nameFor(tensor.name)}_ptr`)),
+    ...scalars.map((scalar) => names.nameFor(scalar.name)),
     ...dimArguments,
     "BLOCK_SIZE: tl.constexpr",
   ];
@@ -202,13 +195,13 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
   for (const argument of dimArguments) {
     const owner = ownerOfDim(argument);
     if (owner !== undefined) {
-      wrapperBody.push({ kind: "assign", target: argument, value: `${pyName(owner.name)}.shape[0]` });
+      wrapperBody.push({ kind: "assign", target: argument, value: `${names.nameFor(owner.name)}.shape[0]` });
     }
   }
   const gridDimension = kernel.launch.grid[0];
   const gridBound =
     gridDimension !== undefined && gridDimension.kind === "symbol"
-      ? pyName(gridDimension.name)
+      ? names.nameFor(gridDimension.name)
       : gridDimension !== undefined && gridDimension.kind === "literal"
         ? `${gridDimension.value}`
         : "1";
@@ -220,8 +213,8 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
   wrapperBody.push({
     kind: "expression",
     value: `${kernelFunctionName}[grid](${[
-      ...tensors.map((tensor) => pyName(tensor.name)),
-      ...scalars.map((scalar) => pyName(scalar.name)),
+      ...tensors.map((tensor) => names.nameFor(tensor.name)),
+      ...scalars.map((scalar) => names.nameFor(scalar.name)),
       ...dimArguments,
       `BLOCK_SIZE=${tritonElementwiseBlockSize}`,
     ].join(", ")})`,
@@ -235,8 +228,8 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
       body,
     },
     wrapperFunction: {
-      name: pyName(kernel.name),
-      parameters: [...tensors.map((tensor) => pyName(tensor.name)), ...scalars.map((scalar) => pyName(scalar.name))],
+      name: wrapperName,
+      parameters: [...tensors.map((tensor) => names.nameFor(tensor.name)), ...scalars.map((scalar) => names.nameFor(scalar.name))],
       decorators: [],
       body: wrapperBody,
     },

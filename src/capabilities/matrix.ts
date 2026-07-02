@@ -39,10 +39,10 @@ export const tritonIntrinsicRows: readonly TritonIntrinsicRow[] = Object.freeze(
 export const tritonElementwiseBlockSize = 1024;
 export const tritonMatmulBlockPolicy = Object.freeze({ blockM: 64, blockN: 64, blockK: 32 });
 
-// The initial capability matrix from the backend starter kit: float32/int32/
-// bool, rank 1 elementwise and rank 2 matmul, contiguous layouts, CUDA
-// devices, masked load/store, 1D/2D launch, sum reduction. Atomics, barriers,
-// wide dtypes, and max reductions stay unsupported and fail closed upstream.
+// The supported capability matrix: float32/int32/bool, rank 1 elementwise
+// and rank 2 matmul, contiguous layouts, CUDA devices, masked load/store,
+// 1D/2D launch, sum reduction. Atomics, barriers, wide dtypes, and max
+// reductions are outside the matrix and fail closed upstream.
 export const tritonCapabilities: GpuBackendCapabilitySet = Object.freeze({
   backendId: tritonGpuBackendId,
   maxTensorRank: 2,
