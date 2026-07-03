@@ -118,7 +118,10 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
         }
         case "binary": {
           const name = names.nameFor(operation.result);
-          const operator = binaryOperatorText.get(operation.operator) ?? operation.operator;
+          const operator = binaryOperatorText.get(operation.operator);
+          if (operator === undefined) {
+            throw new Error(`Triton elementwise lowering has no operator row for '${operation.operator}' after validation accepted it.`);
+          }
           body.push({
             kind: "assign",
             target: name,
@@ -134,15 +137,18 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
         }
         case "intrinsic": {
           const row = tritonIntrinsicRows.find((candidate) => candidate.intrinsic === operation.name);
+          if (row === undefined) {
+            throw new Error(`Triton elementwise lowering has no intrinsic row for '${operation.name}' after validation accepted it.`);
+          }
           const name = names.nameFor(operation.result);
           const args = operation.operands.map((operand) => reference(operand)).join(", ");
-          body.push({ kind: "assign", target: name, value: `${row?.tritonExpression ?? "tl.unsupported"}(${args})` });
+          body.push({ kind: "assign", target: name, value: `${row.tritonExpression}(${args})` });
           break;
         }
         case "load": {
           const tensor = tensorByName.get(operation.tensor);
           if (tensor === undefined) {
-            break;
+            throw new Error(`Triton elementwise lowering references unknown tensor '${operation.tensor}' after validation accepted it.`);
           }
           const name = names.nameFor(operation.result);
           const maskExpression = maskExpressionFor(tensor, guards);
@@ -156,7 +162,7 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
         case "store": {
           const tensor = tensorByName.get(operation.tensor);
           if (tensor === undefined) {
-            break;
+            throw new Error(`Triton elementwise lowering references unknown tensor '${operation.tensor}' after validation accepted it.`);
           }
           const maskExpression = maskExpressionFor(tensor, guards);
           body.push({
@@ -176,7 +182,9 @@ export function lowerElementwiseKernel(kernel: GpuIrFunction, plan: ElementwiseP
         case "return":
           break;
         default:
-          break;
+          throw new Error(
+            `Triton elementwise lowering has no rule for operation '${(operation as { kind: string }).kind}' after classification accepted the kernel.`,
+          );
       }
     }
   };
