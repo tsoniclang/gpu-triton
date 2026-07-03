@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "Triton backend plugin for the Tsonic GPU target family",
   "type": "module",
+  "tsonic": {
+    "kind": "plugin",
+    "contractVersion": 1,
+    "entry": "."
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
@@ -14,7 +19,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "bash scripts/build.sh",

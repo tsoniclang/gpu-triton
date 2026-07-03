@@ -16,6 +16,17 @@ legality once, and the selected host target places every artifact.
   anything else is a deterministic `TRITON_UNSUPPORTED_IR` diagnostic and zero artifacts.
 - There is no CPU path and no partial lowering.
 
+## Installed Plugin Shape
+
+The package.json `tsonic` manifest is the core host contract, always
+`{ "kind": "plugin", "contractVersion": 1, "entry": "." }`, and the package exports
+`./package.json` so host discovery resolves it through package exports. `createTsonicPlugin()`
+returns the plugin object, which carries `kind: "gpu-backend"` plus `backendId` and
+`createBackend()` — plugin kinds live on returned objects, never in package.json metadata.
+Routing this entry into `@tsonic/target-gpu` at discovery time is a tsonic core host
+requirement (see tsonic-gpu `docs/core-host-requests.md`). Triton is one backend plugin among
+many, selected through target options — never special compiler knowledge.
+
 ## Lowering Paths
 
 - **Elementwise (rank 1)** — the global thread index becomes a `BLOCK_SIZE`-wide offsets
