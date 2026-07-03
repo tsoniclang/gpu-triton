@@ -1,0 +1,36 @@
+{
+  "name": "@tsonic/gpu-triton",
+  "version": "0.0.1",
+  "description": "Triton backend plugin for the Tsonic GPU target family",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "test": "npm run build && node --test test/*.test.mjs test/architecture/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@tsonic/target-api": "0.0.1",
+    "@tsonic/target-gpu": "0.0.1"
+  },
+  "devDependencies": {
+    "@tsonic/source-core": "file:../tsonic/packages/source-core",
+    "@tsonic/target-api": "file:../tsonic/packages/target-api",
+    "@tsonic/target-gpu": "file:../tsonic-gpu",
+    "@tsonic/tsts": "file:../tsonic/packages/tsts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
