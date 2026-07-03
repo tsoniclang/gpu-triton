@@ -1,5 +1,11 @@
 export { createTritonGpuBackend } from "./backend/triton-backend.js";
 export {
+  createTsonicPlugin,
+  readTsonicPluginManifest,
+  tritonBackendPluginId,
+  type TritonBackendPluginManifest,
+} from "./plugin.js";
+export {
   tritonCapabilities,
   tritonElementwiseBlockSize,
   tritonGpuBackendId,

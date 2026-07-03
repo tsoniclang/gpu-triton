@@ -186,18 +186,20 @@ export const defaultGpuTarget = Object.freeze({
   options: Object.freeze({ backendId: "triton", hostTargetId: "python" }),
 });
 
-export function createGpuSession({ files, target = defaultGpuTarget, packages = [], entryPoint = "index.ts", hosts, backends } = {}) {
-  const pack = createGpuTargetPack({
-    backends: backends ?? [createTritonGpuBackend()],
-    hosts: hosts ?? [createFakeGpuHostIntegration("python")],
-  });
+export function createGpuSession({ files, target = defaultGpuTarget, packages = [], entryPoint = "index.ts", hosts, backends, pack } = {}) {
+  const resolvedPack =
+    pack ??
+    createGpuTargetPack({
+      backends: backends ?? [createTritonGpuBackend()],
+      hosts: hosts ?? [createFakeGpuHostIntegration("python")],
+    });
   const project = { entryPoint, targets: [target] };
   const providerContext = {
     project,
     target,
-    targetPack: pack,
+    targetPack: resolvedPack,
     selectedSurfaces: [],
-    selectedPackages: packages,
+    selectedCapabilities: packages,
   };
   const fileMap = new Map(Object.entries(files).map(([name, text]) => [`/src/${name}`, text]));
   const session = createCompilerSessionFromFiles({
@@ -213,12 +215,12 @@ export function createGpuSession({ files, target = defaultGpuTarget, packages = 
       activeTarget: "gpu",
       extensions: [
         createTsonicCoreSourceExtension(),
-        ...pack.provider.createExtensions(providerContext),
+        ...resolvedPack.provider.createExtensions(providerContext),
         ...packages.flatMap((providerPackage) => providerPackage.createExtensions?.({ ...providerContext, package: providerPackage }) ?? []),
       ],
     },
   });
-  return { session, pack, project, target, providerContext };
+  return { session, pack: resolvedPack, project, target, providerContext };
 }
 
 export function checkGpuSession(harness, fileNames) {
@@ -238,9 +240,9 @@ export function checkGpuSession(harness, fileNames) {
   return session.finalizeExtensions();
 }
 
-export function compileGpu({ files, target = defaultGpuTarget, packages = [], entryPoint = "index.ts", hosts, backends }) {
+export function compileGpu({ files, target = defaultGpuTarget, packages = [], entryPoint = "index.ts", hosts, backends, pack }) {
   const resolvedPackages = packages.length === 0 ? [acmeTensorPackage()] : packages;
-  const harness = createGpuSession({ files, target, packages: resolvedPackages, entryPoint, hosts, backends });
+  const harness = createGpuSession({ files, target, packages: resolvedPackages, entryPoint, hosts, backends, pack });
   const extensionHost = checkGpuSession(harness);
   const input = createGpuCompileInputFromSession({
     session: harness.session,

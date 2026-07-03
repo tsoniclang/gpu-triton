@@ -37,9 +37,18 @@ test("the backend never consumes TypeScript ASTs or TSTS internals", () => {
 });
 
 test("no tsonic-python or host-project ownership in the backend", () => {
-  const banned = /tsonic-python|pyproject|writeFile|node:fs/iu;
+  const banned = /tsonic-python|pyproject|writeFile|appendFile|mkdir/iu;
   for (const { path, text } of sourceFiles) {
     assert.doesNotMatch(text, banned, `${path} reaches into host project ownership`);
+  }
+});
+
+test("filesystem access is limited to the plugin manifest read", () => {
+  for (const { path, text } of sourceFiles) {
+    if (path.endsWith("/plugin.ts")) {
+      continue;
+    }
+    assert.doesNotMatch(text, /node:fs/u, `${path} touches the filesystem; only the plugin manifest read may`);
   }
 });
 
