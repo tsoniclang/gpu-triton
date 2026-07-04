@@ -2,7 +2,9 @@
 // allocator covering its jit function and wrapper: distinct IR ids can never
 // map to the same Python identifier, because every allocated name joins one
 // used-set and candidates are suffixed until free. Extraction temporaries
-// (%N) become _tN.
+// (%N) become _tN. Sanitization exists only for Python validity and path
+// safety: source-visible names are never recased, and ids that are already
+// valid identifiers pass through byte-for-byte unless they collide.
 
 const reservedPythonNames = new Set([
   "False",

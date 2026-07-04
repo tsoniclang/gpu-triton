@@ -52,6 +52,15 @@ test("filesystem access is limited to the plugin manifest read", () => {
   }
 });
 
+test("no source-name recasing in the backend", () => {
+  // Provider/library/source-visible names are never auto-recased; emitted
+  // names are sanitized only for Python validity and path safety.
+  const banned = /toUpperCase\(|toLowerCase\(|camelcase|snakecase|pascalcase/iu;
+  for (const { path, text } of sourceFiles) {
+    assert.doesNotMatch(text, banned, `${path} recases names`);
+  }
+});
+
 test("no CPU-recovery semantics in the backend", () => {
   for (const { path, text } of sourceFiles) {
     assert.doesNotMatch(text, /fallback/iu, `${path} mentions a recovery lane; Triton lowering must fail closed`);
